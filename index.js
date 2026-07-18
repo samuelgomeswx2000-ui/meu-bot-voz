@@ -1,3 +1,6 @@
+const http = require('http');
+http.createServer((req, res) => res.end('Bot rodando!')).listen(process.env.PORT || 3000);
+
 const { Client, GatewayIntentBits } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, entersState, VoiceConnectionStatus } = require('@discordjs/voice');
 const Groq = require('groq-sdk');
