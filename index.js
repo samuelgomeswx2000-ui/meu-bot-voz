@@ -13,6 +13,7 @@ client.on('ready', () => console.log(`Bot online como ${client.user.tag}`));
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
+  // !tiktok @usuario
   if (message.content.startsWith('!tiktok ')) {
     const usuario = message.content.slice(8).trim().replace('@', '');
     try {
@@ -47,6 +48,35 @@ client.on('messageCreate', async (message) => {
       console.log(e.message);
       return message.reply('Erro ao buscar esse perfil. O TikTok pode ter bloqueado temporariamente ou o @ tá errado.');
     }
+  }
+
+  // !fip @user1 @user2
+  if (message.content.startsWith('!fip ')) {
+    const users = message.mentions.users;
+    if (users.size < 2) return message.reply('Use: !fip @usuario1 @usuario2');
+
+    const [user1, user2] = [...users.values()];
+
+    const combinado = [user1.id, user2.id].sort().join('');
+    let hash = 0;
+    for (let i = 0; i < combinado.length; i++) hash = (hash * 31 + combinado.charCodeAt(i)) % 101;
+    const porcentagem = hash;
+
+    const blocosCheios = Math.round(porcentagem / 10);
+    const barra = '🟩'.repeat(blocosCheios) + '⬜'.repeat(10 - blocosCheios);
+
+    let emoji = '👍';
+    if (porcentagem >= 70) emoji = '❤️';
+    else if (porcentagem >= 40) emoji = '🤝';
+
+    const embed = new EmbedBuilder()
+      .setAuthor({ name: user1.username, iconURL: user1.displayAvatarURL() })
+      .setTitle(`${user1.username} ${emoji} ${user2.username}`)
+      .setThumbnail(user2.displayAvatarURL())
+      .setDescription(`${barra}\n\n**${porcentagem}%** de compatibilidade`)
+      .setColor(porcentagem >= 70 ? 0xff0088 : porcentagem >= 40 ? 0xffaa00 : 0x888888);
+
+    return message.channel.send({ embeds: [embed] });
   }
 });
 
