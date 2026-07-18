@@ -1,9 +1,10 @@
 {
-  "name": "bot-vendas",
+  "name": "bot-dados",
   "version": "1.0.0",
   "type": "commonjs",
   "main": "index.js",
   "dependencies": {
-    "discord.js": "^14.14.1"
+    "discord.js": "^14.14.1",
+    "axios": "^1.7.2"
   }
 }
