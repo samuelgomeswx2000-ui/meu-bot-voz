@@ -19,55 +19,50 @@ const client = new Client({
 
 client.on('ready', () => console.log(`Bot online como ${client.user.tag}`));
 
+async function buscarElenco(nomeTime, message) {
+  try {
+    const buscaTime = await axios.get(`${SPORTSDB}/searchteams.php?t=${encodeURIComponent(nomeTime)}`);
+    const time = buscaTime.data.teams?.[0];
+    if (!time) return message.reply('Time/seleção não encontrado. Tenta o nome em inglês se não achar em português (ex: Brazil em vez de Brasil).');
+
+    const jogadores = await axios.get(`${SPORTSDB}/lookup_all_players.php?id=${time.idTeam}`);
+    const lista = jogadores.data.player;
+    if (!lista || lista.length === 0) return message.reply('Elenco não cadastrado na base pra esse time.');
+
+    const elencoTexto = lista
+      .slice(0, 30)
+      .map(p => `${p.strNumber ? `#${p.strNumber} ` : ''}${p.strPlayer} — ${p.strPosition || 'N/A'}`)
+      .join('\n');
+
+    const embed = new EmbedBuilder()
+      .setTitle(time.strTeam)
+      .setThumbnail(time.strTeamBadge)
+      .addFields(
+        { name: 'Ano de fundação', value: time.intFormedYear || 'N/A', inline: true },
+        { name: 'País', value: time.strCountry || 'N/A', inline: true },
+        { name: `Elenco (${lista.length} jogadores)`, value: elencoTexto || 'N/A' }
+      )
+      .setColor(0x00ff88);
+
+    return message.channel.send({ embeds: [embed] });
+  } catch (e) {
+    console.log(e.message);
+    return message.reply('Erro ao buscar dados. Tenta de novo em alguns segundos.');
+  }
+}
+
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  // !camisa 10 Brasil
-  if (message.content.startsWith('!camisa ')) {
-    const partes = message.content.slice(8).trim().split(' ');
-    const numero = partes[0];
-    const nomeTime = partes.slice(1).join(' ');
-
-    if (!numero || !nomeTime) return message.reply('Use: !camisa (número) (time)');
-
-    try {
-      const buscaTime = await axios.get(`${SPORTSDB}/searchteams.php?t=${encodeURIComponent(nomeTime)}`);
-      const time = buscaTime.data.teams?.[0];
-      if (!time) return message.reply('Time não encontrado.');
-
-      const jogadores = await axios.get(`${SPORTSDB}/lookup_all_players.php?id=${time.idTeam}`);
-      const jogador = jogadores.data.player?.find(p => p.strNumber === numero);
-      if (!jogador) return message.reply(`Não achei jogador com a camisa ${numero} nesse time (dado pode não estar cadastrado).`);
-
-      const ultimoJogo = await axios.get(`${SPORTSDB}/eventslast.php?id=${time.idTeam}`);
-      const evento = ultimoJogo.data.results?.[0];
-
-      const embed = new EmbedBuilder()
-        .setTitle(`${jogador.strPlayer} — #${numero}`)
-        .setThumbnail(jogador.strCutout || jogador.strThumb || time.strTeamBadge)
-        .addFields(
-          { name: 'Time', value: time.strTeam, inline: true },
-          { name: 'Posição', value: jogador.strPosition || 'N/A', inline: true },
-          { name: 'Nacionalidade', value: jogador.strNationality || 'N/A', inline: true },
-          { name: 'Nascimento', value: jogador.dateBorn || 'N/A', inline: true }
-        )
-        .setColor(0x00ff88);
-
-      if (evento) {
-        embed.addFields({
-          name: 'Último jogo',
-          value: `${evento.strHomeTeam} ${evento.intHomeScore} x ${evento.intAwayScore} ${evento.strAwayTeam} (${evento.dateEvent})`
-        });
-      }
-
-      return message.channel.send({ embeds: [embed] });
-    } catch (e) {
-      console.log(e.message);
-      return message.reply('Erro ao buscar dados. Tenta de novo em alguns segundos.');
-    }
+  if (message.content.startsWith('!time ')) {
+    return buscarElenco(message.content.slice(6).trim(), message);
   }
 
-  // !famoso add Nome | TikTok | Nascimento | Patrimônio | LinkFoto
+  if (message.content.startsWith('!seleção ') || message.content.startsWith('!selecao ')) {
+    const nome = message.content.replace('!seleção ', '').replace('!selecao ', '').trim();
+    return buscarElenco(nome, message);
+  }
+
   if (message.content.startsWith('!famoso add') && message.author.id === OWNER_ID) {
     const args = message.content.slice(12).trim().split('|').map(p => p.trim());
     if (args.length < 5) return message.reply('Use: !famoso add Nome | TikTok | Nascimento | Patrimônio | LinkFoto');
@@ -76,7 +71,6 @@ client.on('messageCreate', async (message) => {
     return message.reply(`"${args[0]}" cadastrado!`);
   }
 
-  // !famoso Nome
   if (message.content.startsWith('!famoso ') && !message.content.startsWith('!famoso add')) {
     const nome = message.content.slice(8).trim();
     const f = famosos.find(x => x.nome.toLowerCase() === nome.toLowerCase());
