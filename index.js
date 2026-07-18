@@ -3,15 +3,6 @@ http.createServer((req, res) => res.end('Bot rodando!')).listen(process.env.PORT
 
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const axios = require('axios');
-const fs = require('fs');
-
-const OWNER_ID = '1452103338177986620';
-const FAMOSOS_FILE = './famosos.json';
-const SPORTSDB = 'https://www.thesportsdb.com/api/v1/json/3';
-
-let famosos = [];
-if (fs.existsSync(FAMOSOS_FILE)) famosos = JSON.parse(fs.readFileSync(FAMOSOS_FILE, 'utf8'));
-function salvarFamosos() { fs.writeFileSync(FAMOSOS_FILE, JSON.stringify(famosos, null, 2)); }
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
@@ -19,73 +10,43 @@ const client = new Client({
 
 client.on('ready', () => console.log(`Bot online como ${client.user.tag}`));
 
-async function buscarElenco(nomeTime, message) {
-  try {
-    const buscaTime = await axios.get(`${SPORTSDB}/searchteams.php?t=${encodeURIComponent(nomeTime)}`);
-    const time = buscaTime.data.teams?.[0];
-    if (!time) return message.reply('Time/seleção não encontrado. Tenta o nome em inglês se não achar em português (ex: Brazil em vez de Brasil).');
-
-    const jogadores = await axios.get(`${SPORTSDB}/lookup_all_players.php?id=${time.idTeam}`);
-    const lista = jogadores.data.player;
-    if (!lista || lista.length === 0) return message.reply('Elenco não cadastrado na base pra esse time.');
-
-    const elencoTexto = lista
-      .slice(0, 30)
-      .map(p => `${p.strNumber ? `#${p.strNumber} ` : ''}${p.strPlayer} — ${p.strPosition || 'N/A'}`)
-      .join('\n');
-
-    const embed = new EmbedBuilder()
-      .setTitle(time.strTeam)
-      .setThumbnail(time.strTeamBadge)
-      .addFields(
-        { name: 'Ano de fundação', value: time.intFormedYear || 'N/A', inline: true },
-        { name: 'País', value: time.strCountry || 'N/A', inline: true },
-        { name: `Elenco (${lista.length} jogadores)`, value: elencoTexto || 'N/A' }
-      )
-      .setColor(0x00ff88);
-
-    return message.channel.send({ embeds: [embed] });
-  } catch (e) {
-    console.log(e.message);
-    return message.reply('Erro ao buscar dados. Tenta de novo em alguns segundos.');
-  }
-}
-
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  if (message.content.startsWith('!time ')) {
-    return buscarElenco(message.content.slice(6).trim(), message);
-  }
+  if (message.content.startsWith('!tiktok ')) {
+    const usuario = message.content.slice(8).trim().replace('@', '');
+    try {
+      const resposta = await axios.get(`https://www.tiktok.com/@${usuario}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
 
-  if (message.content.startsWith('!seleção ') || message.content.startsWith('!selecao ')) {
-    const nome = message.content.replace('!seleção ', '').replace('!selecao ', '').trim();
-    return buscarElenco(nome, message);
-  }
+      const match = resposta.data.match(/<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application\/json">(.+?)<\/script>/);
+      if (!match) return message.reply('Não consegui ler os dados desse perfil. Tenta de novo ou confere o @.');
 
-  if (message.content.startsWith('!famoso add') && message.author.id === OWNER_ID) {
-    const args = message.content.slice(12).trim().split('|').map(p => p.trim());
-    if (args.length < 5) return message.reply('Use: !famoso add Nome | TikTok | Nascimento | Patrimônio | LinkFoto');
-    famosos.push({ nome: args[0], tiktok: args[1], nascimento: args[2], patrimonio: args[3], foto: args[4] });
-    salvarFamosos();
-    return message.reply(`"${args[0]}" cadastrado!`);
-  }
+      const json = JSON.parse(match[1]);
+      const userDetail = json.__DEFAULT_SCOPE__['webapp.user-detail'];
+      if (!userDetail || !userDetail.userInfo) return message.reply('Perfil não encontrado.');
 
-  if (message.content.startsWith('!famoso ') && !message.content.startsWith('!famoso add')) {
-    const nome = message.content.slice(8).trim();
-    const f = famosos.find(x => x.nome.toLowerCase() === nome.toLowerCase());
-    if (!f) return message.reply('Não encontrado. Use !famoso add pra cadastrar.');
+      const { user, stats } = userDetail.userInfo;
 
-    const embed = new EmbedBuilder()
-      .setTitle(f.nome)
-      .setThumbnail(f.foto)
-      .addFields(
-        { name: 'TikTok', value: f.tiktok, inline: true },
-        { name: 'Nascimento', value: f.nascimento, inline: true },
-        { name: 'Patrimônio (estimado)', value: f.patrimonio, inline: true }
-      )
-      .setColor(0xff0088);
-    return message.channel.send({ embeds: [embed] });
+      const embed = new EmbedBuilder()
+        .setTitle(`@${user.uniqueId}`)
+        .setDescription(user.signature || 'Sem bio')
+        .setThumbnail(user.avatarLarger)
+        .addFields(
+          { name: 'Seguidores', value: String(stats.followerCount), inline: true },
+          { name: 'Seguindo', value: String(stats.followingCount), inline: true },
+          { name: 'Curtidas totais', value: String(stats.heartCount), inline: true },
+          { name: 'Vídeos', value: String(stats.videoCount), inline: true }
+        )
+        .setURL(`https://www.tiktok.com/@${user.uniqueId}`)
+        .setColor(0x000000);
+
+      return message.channel.send({ embeds: [embed] });
+    } catch (e) {
+      console.log(e.message);
+      return message.reply('Erro ao buscar esse perfil. O TikTok pode ter bloqueado temporariamente ou o @ tá errado.');
+    }
   }
 });
 
