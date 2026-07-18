@@ -1,20 +1,17 @@
 const http = require('http');
 http.createServer((req, res) => res.end('Bot rodando!')).listen(process.env.PORT || 3000);
 
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const axios = require('axios');
 const fs = require('fs');
 
 const OWNER_ID = '1452103338177986620';
-const CANAL_TICKET_ID = '1528065105390993408';
-const PRODUTOS_FILE = './produtos.json';
+const FAMOSOS_FILE = './famosos.json';
+const SPORTSDB = 'https://www.thesportsdb.com/api/v1/json/3';
 
-let produtos = [];
-if (fs.existsSync(PRODUTOS_FILE)) {
-  produtos = JSON.parse(fs.readFileSync(PRODUTOS_FILE, 'utf8'));
-}
-function salvarProdutos() {
-  fs.writeFileSync(PRODUTOS_FILE, JSON.stringify(produtos, null, 2));
-}
+let famosos = [];
+if (fs.existsSync(FAMOSOS_FILE)) famosos = JSON.parse(fs.readFileSync(FAMOSOS_FILE, 'utf8'));
+function salvarFamosos() { fs.writeFileSync(FAMOSOS_FILE, JSON.stringify(famosos, null, 2)); }
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
@@ -22,104 +19,80 @@ const client = new Client({
 
 client.on('ready', () => console.log(`Bot online como ${client.user.tag}`));
 
-// Comando pra postar o painel com botão (rode manualmente 1 vez)
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  // !setuppainel -> posta a mensagem com botão no canal de compra
-  if (message.content === '!setuppainel' && message.author.id === OWNER_ID) {
-    const canal = await client.channels.fetch(CANAL_TICKET_ID);
-    const embed = new EmbedBuilder()
-      .setTitle('🛒 Loja')
-      .setDescription('Clique no botão abaixo para abrir um ticket e ver os produtos.')
-      .setColor(0x00ff88);
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('abrir_ticket').setLabel('Abrir Ticket').setStyle(ButtonStyle.Success)
-    );
-    await canal.send({ embeds: [embed], components: [row] });
-    return message.reply('Painel postado!');
+  // !camisa 10 Brasil
+  if (message.content.startsWith('!camisa ')) {
+    const partes = message.content.slice(8).trim().split(' ');
+    const numero = partes[0];
+    const nomeTime = partes.slice(1).join(' ');
+
+    if (!numero || !nomeTime) return message.reply('Use: !camisa (número) (time)');
+
+    try {
+      const buscaTime = await axios.get(`${SPORTSDB}/searchteams.php?t=${encodeURIComponent(nomeTime)}`);
+      const time = buscaTime.data.teams?.[0];
+      if (!time) return message.reply('Time não encontrado.');
+
+      const jogadores = await axios.get(`${SPORTSDB}/lookup_all_players.php?id=${time.idTeam}`);
+      const jogador = jogadores.data.player?.find(p => p.strNumber === numero);
+      if (!jogador) return message.reply(`Não achei jogador com a camisa ${numero} nesse time (dado pode não estar cadastrado).`);
+
+      const ultimoJogo = await axios.get(`${SPORTSDB}/eventslast.php?id=${time.idTeam}`);
+      const evento = ultimoJogo.data.results?.[0];
+
+      const embed = new EmbedBuilder()
+        .setTitle(`${jogador.strPlayer} — #${numero}`)
+        .setThumbnail(jogador.strCutout || jogador.strThumb || time.strTeamBadge)
+        .addFields(
+          { name: 'Time', value: time.strTeam, inline: true },
+          { name: 'Posição', value: jogador.strPosition || 'N/A', inline: true },
+          { name: 'Nacionalidade', value: jogador.strNationality || 'N/A', inline: true },
+          { name: 'Nascimento', value: jogador.dateBorn || 'N/A', inline: true }
+        )
+        .setColor(0x00ff88);
+
+      if (evento) {
+        embed.addFields({
+          name: 'Último jogo',
+          value: `${evento.strHomeTeam} ${evento.intHomeScore} x ${evento.intAwayScore} ${evento.strAwayTeam} (${evento.dateEvent})`
+        });
+      }
+
+      return message.channel.send({ embeds: [embed] });
+    } catch (e) {
+      console.log(e.message);
+      return message.reply('Erro ao buscar dados. Tenta de novo em alguns segundos.');
+    }
   }
 
-  // !paineledit add Nome | Preço | Link
-  if (message.content.startsWith('!paineledit') && message.author.id === OWNER_ID) {
-    const args = message.content.slice(11).trim();
-
-    if (args.startsWith('add ')) {
-      const partes = args.slice(4).split('|').map(p => p.trim());
-      if (partes.length < 3) return message.reply('Formato: !paineledit add Nome | Preço | Link');
-      produtos.push({ nome: partes[0], preco: partes[1], link: partes[2] });
-      salvarProdutos();
-      return message.reply(`Produto "${partes[0]}" adicionado!`);
-    }
-
-    if (args.startsWith('remove ')) {
-      const nome = args.slice(7).trim();
-      produtos = produtos.filter(p => p.nome.toLowerCase() !== nome.toLowerCase());
-      salvarProdutos();
-      return message.reply(`Produto "${nome}" removido!`);
-    }
-
-    if (args === 'list') {
-      if (produtos.length === 0) return message.reply('Nenhum produto cadastrado.');
-      const lista = produtos.map(p => `**${p.nome}** - ${p.preco}\n${p.link}`).join('\n\n');
-      return message.reply(lista);
-    }
+  // !famoso add Nome | TikTok | Nascimento | Patrimônio | LinkFoto
+  if (message.content.startsWith('!famoso add') && message.author.id === OWNER_ID) {
+    const args = message.content.slice(12).trim().split('|').map(p => p.trim());
+    if (args.length < 5) return message.reply('Use: !famoso add Nome | TikTok | Nascimento | Patrimônio | LinkFoto');
+    famosos.push({ nome: args[0], tiktok: args[1], nascimento: args[2], patrimonio: args[3], foto: args[4] });
+    salvarFamosos();
+    return message.reply(`"${args[0]}" cadastrado!`);
   }
 
-  // !painelv -> mostra produtos pra quem tá no ticket
-  if (message.content === '!painelv') {
-    if (produtos.length === 0) return message.reply('Nenhum produto disponível no momento.');
+  // !famoso Nome
+  if (message.content.startsWith('!famoso ') && !message.content.startsWith('!famoso add')) {
+    const nome = message.content.slice(8).trim();
+    const f = famosos.find(x => x.nome.toLowerCase() === nome.toLowerCase());
+    if (!f) return message.reply('Não encontrado. Use !famoso add pra cadastrar.');
+
     const embed = new EmbedBuilder()
-      .setTitle('🛒 Produtos disponíveis')
-      .setDescription(produtos.map(p => `**${p.nome}** — ${p.preco}`).join('\n'))
-      .setColor(0x00ff88)
-      .setFooter({ text: 'Chame um responsável pra confirmar seu pagamento!' });
+      .setTitle(f.nome)
+      .setThumbnail(f.foto)
+      .addFields(
+        { name: 'TikTok', value: f.tiktok, inline: true },
+        { name: 'Nascimento', value: f.nascimento, inline: true },
+        { name: 'Patrimônio (estimado)', value: f.patrimonio, inline: true }
+      )
+      .setColor(0xff0088);
     return message.channel.send({ embeds: [embed] });
   }
-
-  // !confirmar Nome @user
-  if (message.content.startsWith('!confirmar') && message.author.id === OWNER_ID) {
-    const mencionado = message.mentions.users.first();
-    if (!mencionado) return message.reply('Menciona o usuário: !confirmar Nome @user');
-
-    const nomeProduto = message.content.replace('!confirmar', '').replace(`<@${mencionado.id}>`, '').trim();
-    const produto = produtos.find(p => p.nome.toLowerCase() === nomeProduto.toLowerCase());
-    if (!produto) return message.reply('Produto não encontrado. Use !paineledit list pra ver os nomes certos.');
-
-    const embed = new EmbedBuilder()
-      .setTitle('🎉 Parabéns pela compra!')
-      .setDescription(`**Produto:** ${produto.nome}\n**Download:** ${produto.link}\n\nConvidei 5 pessoas para ganhar 2 reais no servidor!`)
-      .setColor(0x00ff88);
-
-    return message.channel.send({ content: `${mencionado}`, embeds: [embed] });
-  }
-});
-
-// Botão "Abrir Ticket"
-client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isButton()) return;
-  if (interaction.customId !== 'abrir_ticket') return;
-
-  const canalOriginal = interaction.channel;
-  const nomeCanal = `ticket-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
-
-  const ticketExistente = interaction.guild.channels.cache.find(c => c.name === nomeCanal);
-  if (ticketExistente) {
-    return interaction.reply({ content: `Você já tem um ticket aberto: ${ticketExistente}`, ephemeral: true });
-  }
-
-  const canal = await interaction.guild.channels.create({
-    name: nomeCanal,
-    parent: canalOriginal.parentId || null,
-    permissionOverwrites: [
-      { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-      { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-      { id: OWNER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
-    ]
-  });
-
-  await canal.send(`Olá ${interaction.user}, bem-vindo! Use \`!painelv\` para ver os produtos.`);
-  await interaction.reply({ content: `Ticket criado: ${canal}`, ephemeral: true });
 });
 
 client.login(process.env.DISCORD_TOKEN);
